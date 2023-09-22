@@ -1,0 +1,24 @@
+"0",""
+"0","knitr::opts_chunk$set(echo = FALSE)"
+"0","rm(list = ls())"
+"0",""
+"0","library(tidyverse)"
+"0","library(openxlsx)"
+"0","library(countrycode)"
+"0","library(ggrepel)"
+"0","library(patchwork)"
+"0","library(zoo)"
+"2","
+Attache Paket: ‘zoo’
+
+"
+"2","Die folgenden Objekte sind maskiert von ‘package:base’:
+
+    as.Date, as.Date.numeric
+
+"
+"0","library(RColorBrewer)"
+"0","library(lubridate)"
+"0","library(WDI)"
+"0",""
+"0",""

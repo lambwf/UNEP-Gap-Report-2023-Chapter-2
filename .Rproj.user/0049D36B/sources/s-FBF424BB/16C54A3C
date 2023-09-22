@@ -1,0 +1,29 @@
+{
+    "id": "16C54A3C",
+    "path": "C:/Users/lamw/ownCloud/Projects/UNEP Gap Report 2023/UNEP-Gap-Report-2023-Chapter-2-Workbook.Rmd",
+    "project_path": "UNEP-Gap-Report-2023-Chapter-2-Workbook.Rmd",
+    "type": "r_markdown",
+    "hash": "0",
+    "contents": "",
+    "dirty": false,
+    "created": 1694001050638.0,
+    "source_on_save": false,
+    "relative_order": 3,
+    "properties": {
+        "tempName": "Untitled1",
+        "source_window_id": "",
+        "Source": "Source",
+        "cursorPosition": "18,18",
+        "scrollLine": "0",
+        "last_setup_crc32": "",
+        "chunk_output_type": "console"
+    },
+    "folds": "",
+    "lastKnownWriteTime": 1695027677,
+    "encoding": "UTF-8",
+    "collab_server": "",
+    "source_window": "",
+    "last_content_update": 1695027677787,
+    "read_only": false,
+    "read_only_alternatives": []
+}

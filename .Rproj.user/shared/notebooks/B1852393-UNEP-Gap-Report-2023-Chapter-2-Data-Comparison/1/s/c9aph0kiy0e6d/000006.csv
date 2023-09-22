@@ -1,0 +1,20 @@
+"0","wd_plot %>% 
+  ggplot(.,aes(x=year,y=value/1e6)) +
+  geom_line(linewidth=0.7) +
+  scale_x_continuous(limits=c(1990,2021)) +
+  scale_y_continuous(limits=c(0,NA)) +
+  #scale_color_brewer(palette=""Set2"") +
+  facet_wrap(.~country,scales=""free"",ncol=4) +
+  theme_wl() +
+  theme(legend.position=""bottom"",
+        legend.title=element_blank(),
+        axis.title = element_blank(),
+        strip.background = element_blank(),
+        strip.text = element_text(size=11,hjust=0,color=""#525252""),
+        panel.border = element_blank(),
+        axis.line.x.bottom = element_line(color=""#636363""),
+        axis.line.y.left = element_line(color=""#636363""))
+"
+"2","Warnung:"
+"2"," [38;5;232mRemoved 20 rows containing missing values (`geom_line()`).[39m
+"

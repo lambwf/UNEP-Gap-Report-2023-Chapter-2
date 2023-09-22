@@ -1,0 +1,20 @@
+"0",""
+"0","wrap_elements(p_ghg) + wrap_elements(p_co2) + wrap_elements(p_co2_luc) + wrap_elements(p_ch4) + wrap_elements(p_n2o) + wrap_elements(p_fgases) + plot_layout(ncol=2)"
+"2","Warnung:"
+"2"," [38;5;232mRemoved 682 rows containing non-finite values (`stat_align()`).[39m
+"
+"2","Warnung:"
+"2"," [38;5;232mRemoved 671 rows containing missing values (`geom_path()`).[39m
+"
+"2","Warnung:"
+"2"," [38;5;232mRemoved 44 rows containing missing values (`geom_path()`).[39m
+"
+"2","Warnung:"
+"2"," [38;5;232mRemoved 440 rows containing missing values (`geom_path()`).[39m
+"
+"2","Warnung:"
+"2"," [38;5;232mRemoved 440 rows containing missing values (`geom_path()`).[39m
+"
+"2","Warnung:"
+"2"," [38;5;232mRemoved 440 rows containing missing values (`geom_path()`).[39m
+"

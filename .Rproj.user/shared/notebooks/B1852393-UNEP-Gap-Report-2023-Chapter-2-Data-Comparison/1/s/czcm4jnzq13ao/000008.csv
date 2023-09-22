@@ -1,0 +1,5 @@
+"0","wb <- createWorkbook()"
+"0","addWorksheet(wb,""data_comparison_ghg"")"
+"0","writeData(wb, sheet = ""data_comparison_ghg"", wd_all, colNames = T, rowNames = F)"
+"0",""
+"0",""

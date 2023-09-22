@@ -1,0 +1,8 @@
+"0","primap <- primap %>% 
+  filter(scenario==""HISTCR"") %>% 
+  filter(sector==""M.0.EL"") %>% 
+  group_by(iso,year,gas,unit) %>% 
+  summarise(value=sum(value))
+"
+"1","[38;5;232m`summarise()` has grouped output by 'iso', 'year', 'gas'. You can override using the `.groups` argument.[39m
+"

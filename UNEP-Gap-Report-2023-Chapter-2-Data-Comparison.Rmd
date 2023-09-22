@@ -1,0 +1,460 @@
+---
+title: "UNEP-Gap-Report-2023-Chapter-2-Data-Comparison"
+author: "William F. Lamb"
+date: "5 9 2023"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+
+knitr::opts_chunk$set(echo = FALSE)
+rm(list = ls())
+
+library(tidyverse)
+library(openxlsx)
+library(countrycode)
+library(ggrepel)
+library(patchwork)
+library(zoo)
+library(RColorBrewer)
+library(lubridate)
+library(WDI)
+
+
+```
+
+```{r functions, include=FALSE}
+
+## Aggregations
+
+country_aggregations <- read.csv("https://raw.githubusercontent.com/openclimatedata/countrygroups/main/data/unfccc.csv") %>% 
+  select(Code)
+
+country_aggregations <- left_join(country_aggregations,                                  read.csv("https://raw.githubusercontent.com/openclimatedata/countrygroups/main/data/ldc.csv") %>% 
+                                    select(Code) %>% 
+                                    mutate(LDC=1),by = "Code")
+
+country_aggregations <- left_join(country_aggregations,                                  read.csv("https://raw.githubusercontent.com/openclimatedata/countrygroups/main/data/european-union.csv") %>% 
+                                    select(Code) %>% 
+                                    mutate(EU=1),by = "Code")
+
+country_aggregations <- left_join(country_aggregations,                                  read.csv("https://raw.githubusercontent.com/openclimatedata/countrygroups/main/data/g20.csv") %>% 
+                                    select(Code) %>% 
+                                    mutate(G20=1),by = "Code")
+
+country_aggregations <- left_join(country_aggregations,                                  read.csv("https://raw.githubusercontent.com/openclimatedata/countrygroups/main/data/sids.csv") %>% 
+                                    select(Code) %>% 
+                                    mutate(SIDS=1),by = "Code")
+
+country_aggregations <- country_aggregations %>% 
+  rename(iso=Code)
+  
+
+## figure style
+
+theme_wl <- function() {
+  
+  font <- "sans"
+  
+  theme_bw() %+replace%
+    
+    theme(
+      
+      # Grid elements
+      
+      panel.grid.minor = element_blank(),    #strip minor gridlines
+      axis.ticks = element_line(color="#636363",size = 0.7),          #strip axis ticks
+      
+      
+      # Border lines
+      panel.border = element_rect(color="#636363",fill=NA,size = 0.7),
+      panel.background = element_blank(),
+      
+      # Text elements
+      
+      plot.title = element_text(             #title
+        family = font,            #set font family
+        size = 13,                #set font size
+        face = 'bold',            #bold typeface
+        hjust = 0,                #left align
+        vjust = 3,                #raise slightly
+        color = '#636363'),       #color
+      
+      plot.subtitle = element_text(
+        family = font,
+        size = 11,
+        hjust = 0,
+        vjust = 2,
+        color = '#636363'),
+      
+      plot.caption = element_text(           #caption
+        family = font,            #font family
+        size = 9,                 #font size
+        hjust = 0,                #right align
+        color = '#bdbdbd'),       #color
+      
+      axis.title = element_text(             #axis titles
+        family = font,            #font family
+        size = 10,                #font size
+        color = '#636363'),       #color
+      
+      axis.text = element_text(              #axis text
+        family = font,            #axis famuly
+        size = 9,                 #font size
+        color = '#636363'),       #color
+      
+      axis.text.x = element_text(            #margin for axis text
+        margin=margin(5, b = 10)),
+      
+      text = element_text(
+        family = font,
+        color = '#636363')
+      
+    )
+  
+}
+
+
+custom_color_scale <- function(no_colors) {
+  
+  colors = colorRampPalette(brewer.pal(8, "Set2"))(no_colors)
+  
+}
+
+
+## location of % shares in stacked figures
+
+locate_shares <- function(data,grouping,years){
+
+  shares <- data %>%
+    arrange_at(vars(`year`,all_of(grouping))) %>%
+    mutate(location=value/2)
+  
+  z = length(unique(shares[,grouping]))
+  
+  for (j in seq(0,z*(years-1),z)) {
+    # for every region
+    for (i in 1:z) {
+      if (i != z) {
+        shares$location[i+j] = shares$location[i+j] + sum(shares$value[i+1+j:(z-i+j-1)])
+        #shares$location[i] = shares$location[i] + sum(shares$value[i+1:(z-i))])
+        
+      }
+    }
+  }
+
+  return(shares)
+}
+
+
+## growth rate calculation
+
+growth_rate <- function(years,y) {
+  
+  data <- data.frame(years,y)
+  
+  data <- data %>%
+    mutate(leap_years = leap_year(years)) %>%
+    mutate(adjusted = ifelse(leap_years==TRUE,y*365/366,y))
+  data <- data %>%
+    mutate(y=adjusted)
+
+  fit <- lm(log(y) ~ years,data = data)
+  
+  data <- data %>% 
+    mutate(rate=fit$coefficients[2]) %>% 
+    mutate(predicted_x = exp(predict(fit,data %>% select(years)))) %>% 
+    mutate(st_error = sqrt(diag(vcov(fit)))[2])
+  
+  return(list("rate"=fit$coefficients[2],"data"=data))
+}
+
+```
+
+``` {r data}
+
+load('Data/Not public/edgar_ft_v1_data_ghg_gwp100_ar4.RData')
+load('Data/data_lulucf_nghgi.RData')
+
+
+
+## Global Carbon Project CO2 FFI (https://www.icos-cp.eu/science-and-impact/global-carbon-budget/2022)
+
+data_gcb_co2_ffi <- read.xlsx("Sources/GCB/National_Fossil_Carbon_Emissions_2022v1.0.xlsx",sheet=2,startRow = 12)
+data_gcb_co2_ffi <- gather(data_gcb_co2_ffi,country,value,-X1)
+data_gcb_co2_ffi <- data_gcb_co2_ffi %>% 
+  rename(year=X1) %>% 
+  mutate(iso=countrycode(country,"country.name","iso3c")) %>% 
+  mutate(value=value/1000) %>% 
+  mutate(value=value*(44/12)) %>%
+  mutate(units="GtCO2") %>% 
+  select(country,iso,units,year,value) 
+
+
+## Global Carbon Project CO2 LUC (https://www.icos-cp.eu/science-and-impact/global-carbon-budget/2022)
+
+data_gcb_lulucf_blue = readxl::read_xlsx('Sources/GCB/National_LandUseChange_Carbon_Emissions_2022v1.0.xlsx',range="A8:HK181",sheet=2)
+data_gcb_lulucf_hn = readxl::read_xlsx('Sources/GCB/National_LandUseChange_Carbon_Emissions_2022v1.0.xlsx',range="A8:HK181",sheet=3)
+data_gcb_lulucf_oscar = readxl::read_xlsx('Sources/GCB/National_LandUseChange_Carbon_Emissions_2022v1.0.xlsx',range="A8:HK181",sheet=4)
+
+data_gcb_lulucf_blue <- gather(data_gcb_lulucf_blue,country,blue,-`...1`) %>% 
+  rename(year=`...1`)
+data_gcb_lulucf_hn <- gather(data_gcb_lulucf_hn,country,hn,-`...1`) %>% 
+  rename(year=`...1`)
+data_gcb_lulucf_oscar <- gather(data_gcb_lulucf_oscar,country,oscar,-`...1`) %>% 
+  rename(year=`...1`)
+
+data_gcb_lulucf_ntl <- left_join(data_gcb_lulucf_blue,data_gcb_lulucf_hn)
+data_gcb_lulucf_ntl <- left_join(data_gcb_lulucf_ntl,data_gcb_lulucf_oscar)
+
+data_gcb_lulucf_ntl <- gather(data_gcb_lulucf_ntl %>% filter(year!="QF"),model,value,-year,-country) 
+data_gcb_lulucf_ntl <- data_gcb_lulucf_ntl %>% 
+  mutate(value=value*(44/12)) %>% 
+  mutate(value=value/1000) %>% 
+  mutate(year=as.numeric(year)) %>% 
+  mutate(units="GtCO2")
+
+# Note for coding simplicity I average the bookkeeping models at the national level, before aggregating to regions later on. Results would be slightly different if emissions were summed by model and region, then averaged. NAs ignored
+
+data_gcb_lulucf_ntl <- data_gcb_lulucf_ntl %>% 
+  group_by(country,year,units) %>% 
+  summarise(value=mean(value,na.rm=TRUE))
+
+data_gcb_lulucf_ntl <- spread(data_gcb_lulucf_ntl,year,value)
+data_gcb_lulucf_ntl <- data_gcb_lulucf_ntl %>% 
+  mutate(iso=countrycode(country,"country.name","iso3c")) %>% 
+  mutate(iso=ifelse(country=="Netherlands Antilles","ANT",iso))
+
+data_gcb_lulucf_ntl <- gather(data_gcb_lulucf_ntl,year,value,-country,-units,-iso)
+data_gcb_lulucf_ntl <- data_gcb_lulucf_ntl %>% 
+  mutate(year=as.numeric(year)) %>% 
+  select(country,iso,units,year,value)
+
+
+rm(data_gcb_lulucf_blue,data_gcb_lulucf_hn,data_gcb_lulucf_oscar)
+
+
+## Population data
+
+data_wdi_pop<-WDI(country = "all",indicator = "SP.POP.TOTL",start = 1970,end = 2022,extra=TRUE,language = "en")%>%
+  select(iso3c, country, year, SP.POP.TOTL) %>%
+  filter(!is.na(iso3c))
+
+data_wdi_pop$population <- data_wdi_pop$SP.POP.TOTL
+data_wdi_pop$iso <- data_wdi_pop$iso3c
+data_wdi_pop<-data_wdi_pop %>% select(-SP.POP.TOTL,-iso3c)
+
+
+## PRIMAP
+load('Data/data_primap_v242.RData')
+
+blarg <- primap %>% 
+  filter(iso=="CHN") %>% 
+  filter(year==2021)
+
+primap <- primap %>% 
+  filter(scenario=="HISTCR") %>% 
+  filter(sector=="M.0.EL") %>% 
+  group_by(iso,year,gas,unit) %>% 
+  summarise(value=sum(value))
+
+
+```
+
+``` {r comparison_ghg,fig.width=8,fig.height=10,dpi=300,include=FALSE, fig.path="Results/",dev=c('png','pdf','svg')}
+
+wd_primap <- primap %>% 
+  mutate(gas=ifelse(gas=="KYOTOGHG (AR4GWP100)","GHG",gas)) %>% 
+  mutate(gas=ifelse(gas=="FGASES (AR4GWP100)","Fgas",gas)) %>% 
+  filter(gas %in% c("CO2","CH4","N2O","Fgas","GHG"))
+
+load('Data/cc_gwps.RData')
+wd_primap <- left_join(wd_primap,cc_gwps %>% select(gas,gwp100_ar4))
+wd_primap <- wd_primap %>% 
+  mutate(gwp100_ar4=ifelse(gas=="GHG",1,gwp100_ar4)) %>% 
+  mutate(gwp100_ar4=ifelse(gas=="Fgas",1,gwp100_ar4)) %>% 
+  mutate(value=value*gwp100_ar4) %>% 
+  mutate(value=value*1000)
+
+
+wd_inventory <- read.xlsx('Data/Not public/Emissions data Inventories G20 economies.xlsx')
+wd_inventory <- gather(wd_inventory,year,value,`1990`:`2022`) %>% 
+  filter(GWP=="AR4") %>% 
+  mutate(iso=countrycode(sourcevar=Country,origin="country.name",destination="iso3c")) %>% 
+  mutate(year=as.numeric(year)) %>% 
+  select(iso,country=Country,var=Variable,year,ch3_inventory=value) %>% 
+  mutate(ch3_inventory=ch3_inventory*1e6) %>% 
+  mutate(iso=ifelse(is.na(iso),country,iso))
+
+
+wd_all <- gather(edgar_ghg_ar4,gas,value,CH4:GHG) %>% 
+  group_by(iso,country,year,gas) %>% 
+  summarise(edgar=sum(value,na.rm=TRUE))
+
+wd_all <- left_join(wd_all,country_aggregations %>% select(iso,G20,EU))
+
+wd_all <- left_join(wd_all,wd_primap %>% 
+                      group_by(iso,year,gas) %>% 
+                      summarise(primap=sum(value)),
+                    by = join_by(iso, year,gas))
+
+eu <- wd_all %>% 
+  filter(EU==1) %>% 
+  group_by(year,gas) %>% 
+  summarise(edgar=sum(edgar,na.rm=T),
+            primap=sum(primap,na.rm=T)) %>% 
+  mutate(iso="EU27") %>% 
+  mutate(country="EU27") %>% 
+  mutate(G20=1)
+
+wd_all <- rbind(wd_all %>% filter(is.na(EU)),eu) %>% 
+  select(-EU)
+
+
+wd_all <- left_join(wd_all,wd_inventory %>% 
+                      filter(var=="Excl. LULUCF GHG") %>% 
+                      select(-country,-var) %>% 
+                      mutate(gas="GHG"),
+                    by = join_by(iso, year,gas))
+
+
+wd_all <- wd_all %>% 
+  filter(G20==1) %>% 
+  filter(gas=="GHG") %>% 
+  select(-G20,-gas) %>% 
+  mutate(inventory_vs_edgar=(edgar/ch3_inventory)-1) %>% 
+  mutate(inventory_vs_primap=(primap/ch3_inventory)-1)
+
+
+gather(wd_all,dataset,value,edgar,primap,ch3_inventory) %>% 
+  ggplot(.,aes(x=year,y=value/1e6,group=dataset,color=dataset)) +
+  geom_line(linewidth=0.7) +
+  scale_x_continuous(limits=c(1990,2021)) +
+  scale_y_continuous(limits=c(0,NA)) +
+  scale_color_brewer(palette="Set2") +
+  facet_wrap(.~country,scales="free",ncol=4) +
+  theme_wl() +
+  theme(legend.position="bottom",
+        legend.title=element_blank(),
+        axis.title = element_blank(),
+        strip.background = element_blank(),
+        strip.text = element_text(size=11,hjust=0,color="#525252"),
+        panel.border = element_blank(),
+        axis.line.x.bottom = element_line(color="#636363"),
+        axis.line.y.left = element_line(color="#636363")) +
+  labs(title="Greenhouse gas emissions trends of the G20 across datasets",
+       subtitle="MtCO2e (excluding CO2-LULUCF)")
+
+
+wb <- createWorkbook()
+addWorksheet(wb,"data_comparison_ghg")
+writeData(wb, sheet = "data_comparison_ghg", wd_all, colNames = T, rowNames = F)
+
+
+```
+
+``` {r comparison_lulucf,fig.width=8,fig.height=10,dpi=300,include=FALSE, fig.path="Results/",dev=c('png','pdf','svg')}
+
+wd_lulucf <- left_join(lulucf_nghgi,country_aggregations %>% select(iso,G20,EU))
+
+wd_lulucf <- rbind(wd_lulucf %>% 
+                     filter(is.na(EU)) %>% 
+                     select(-EU),
+                   wd_lulucf %>% 
+                     filter(EU==1) %>%
+                     group_by(year) %>% 
+                     summarise(value=sum(value)) %>% 
+                     mutate(G20=1) %>% 
+                     mutate(country="EU27") %>% 
+                     mutate(iso="EU27"))
+
+wd_lulucf <- wd_lulucf %>% 
+  filter(G20==1) %>% 
+  select(-G20) %>%
+  rename(grassi_inventory=value)
+
+wd_lulucf <- left_join(wd_lulucf,spread(wd_inventory %>% filter(var!="Excl. LULUCF GHG") %>% select(-country),var,ch3_inventory),
+                       by = join_by(iso, year))
+
+wd_lulucf <- wd_lulucf %>% 
+  rename(ch3_inventory_lulucf_ghg=`LULUCF GHG`,ch3_inventory_lulucf_non_co2=`LULUCF non-CO2`) %>% 
+  arrange(iso) %>% 
+  mutate(country=ifelse(iso=="USA","United States",country))
+
+
+gather(wd_lulucf %>% select(-ch3_inventory_lulucf_non_co2),dataset,value,grassi_inventory,ch3_inventory_lulucf_ghg) %>% 
+  ggplot(.,aes(x=year,y=value/1e6,group=dataset,color=dataset)) +
+  geom_line(linewidth=0.7) +
+  geom_point(data=wd_lulucf %>% 
+               mutate(dataset="ch3_inventory_lulucf_ghg") %>% 
+               rename(value=ch3_inventory_lulucf_ghg) %>%
+               filter(iso %in% c("CHN","IND","SAU"))) +
+  scale_x_continuous(limits=c(1990,2021)) +
+  #scale_y_continuous(limits=c(0,NA)) +
+  scale_color_brewer(palette="Set2") +
+  facet_wrap(.~country,scales="free",ncol=4) +
+  theme_wl() +
+  theme(legend.position="bottom",
+        legend.title=element_blank(),
+        axis.title = element_blank(),
+        strip.background = element_blank(),
+        strip.text = element_text(size=11,hjust=0,color="#525252"),
+        panel.border = element_blank(),
+        axis.line.x.bottom = element_line(color="#636363"),
+        axis.line.y.left = element_line(color="#636363")) +
+  labs(title="Net LULUCF trends of the G20 across datasets",
+       subtitle="MtCO2e")
+
+
+addWorksheet(wb,"data_comparison_lulucf")
+writeData(wb, sheet = "data_comparison_lulucf", wd_lulucf, colNames = T, rowNames = F)
+
+
+
+saveWorkbook(wb,paste0("Results/UNEP-Gap-Report-2023-Chapter-2-Data-Comparison.xlsx"),overwrite=T)
+
+```
+
+
+``` {r g20_figure,fig.width=8,fig.height=10,dpi=300,include=FALSE, fig.path="Results/",dev=c('png','pdf','svg')}
+
+wd_plot <- wd_all %>% select(iso,country,year,primap)
+wd_plot <- left_join(wd_plot,wd_lulucf %>% select(iso,year,grassi_inventory),by = join_by(iso, year))
+wd_plot <- wd_plot %>% 
+  group_by(iso,country) %>% 
+  fill(grassi_inventory) %>% 
+  ungroup() %>% 
+  mutate(value=primap + grassi_inventory)
+
+eu_pop <- left_join(data_wdi_pop,country_aggregations) %>% 
+  filter(EU==1) %>% 
+  group_by(year) %>% 
+  summarise(population=sum(population)) %>% 
+  mutate(iso="EU27")
+
+pop <- rbind(data_wdi_pop %>% select(-country),eu_pop)
+
+
+wd_plot <- left_join(wd_plot,pop)
+wd_plot <- wd_plot %>% 
+  mutate(value_pc=value/population) %>% 
+  filter(year!=2022)
+
+wd_plot %>% 
+  ggplot(.,aes(x=year,y=value/1e6)) +
+  geom_line(linewidth=0.7) +
+  scale_x_continuous(limits=c(1990,2021)) +
+  scale_y_continuous(limits=c(0,NA)) +
+  #scale_color_brewer(palette="Set2") +
+  facet_wrap(.~country,scales="free",ncol=4) +
+  theme_wl() +
+  theme(legend.position="bottom",
+        legend.title=element_blank(),
+        axis.title = element_blank(),
+        strip.background = element_blank(),
+        strip.text = element_text(size=11,hjust=0,color="#525252"),
+        panel.border = element_blank(),
+        axis.line.x.bottom = element_line(color="#636363"),
+        axis.line.y.left = element_line(color="#636363"))
+
+```

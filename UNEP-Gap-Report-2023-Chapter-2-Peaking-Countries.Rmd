@@ -1,0 +1,511 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+
+```{r setup, include=FALSE}
+
+knitr::opts_chunk$set(echo = FALSE)
+rm(list = ls())
+
+library(tidyverse)
+library(openxlsx)
+library(countrycode)
+library(ggrepel)
+library(patchwork)
+library(zoo)
+library(RColorBrewer)
+library(lubridate)
+library(WDI)
+
+
+load('Data/Not public/edgar_ft_v1_data_ghg_gwp100_ar6.RData')
+
+
+data_wdi_pop<-WDI(country = "all",indicator = "SP.POP.TOTL",start = 1970,end = 2022,extra=TRUE,language = "en")%>%
+  select(iso3c, country, year, SP.POP.TOTL) %>%
+  filter(!is.na(iso3c))
+
+data_wdi_pop$population <- data_wdi_pop$SP.POP.TOTL
+data_wdi_pop$iso <- data_wdi_pop$iso3c
+data_wdi_pop<-data_wdi_pop %>% select(-SP.POP.TOTL,-iso3c)
+
+
+```
+
+
+``` {r functions,include=FALSE}
+
+country_aggregations <- read.csv("https://raw.githubusercontent.com/openclimatedata/countrygroups/main/data/unfccc.csv") %>% 
+  select(Code)
+
+country_aggregations <- left_join(country_aggregations,                                  read.csv("https://raw.githubusercontent.com/openclimatedata/countrygroups/main/data/ldc.csv") %>% 
+                                    select(Code) %>% 
+                                    mutate(LDC=1),by = "Code")
+
+country_aggregations <- left_join(country_aggregations,                                  read.csv("https://raw.githubusercontent.com/openclimatedata/countrygroups/main/data/european-union.csv") %>% 
+                                    select(Code) %>% 
+                                    mutate(EU=1),by = "Code")
+
+country_aggregations <- left_join(country_aggregations,                                  read.csv("https://raw.githubusercontent.com/openclimatedata/countrygroups/main/data/g20.csv") %>% 
+                                    select(Code) %>% 
+                                    mutate(G20=1),by = "Code")
+
+country_aggregations <- left_join(country_aggregations,                                  read.csv("https://raw.githubusercontent.com/openclimatedata/countrygroups/main/data/sids.csv") %>% 
+                                    select(Code) %>% 
+                                    mutate(SIDS=1),by = "Code")
+
+country_aggregations <- left_join(country_aggregations,
+read.csv("https://raw.githubusercontent.com/openclimatedata/countrygroups/main/data/annex-one.csv") %>% 
+                                    select(Code) %>% 
+                                    mutate(Annex1=1),by = "Code")
+
+
+
+
+country_aggregations <- country_aggregations %>% 
+  rename(iso=Code)
+  
+
+## growth rate calculation
+
+growth_rate <- function(years,y) {
+  
+  data <- data.frame(years,y)
+  
+  data <- data %>%
+    mutate(leap_years = leap_year(years)) %>%
+    mutate(adjusted = ifelse(leap_years==TRUE,y*365/366,y))
+  data <- data %>%
+    mutate(y=adjusted)
+
+  fit <- lm(log(y) ~ years,data = data)
+  
+  data <- data %>% 
+    mutate(rate=fit$coefficients[2]) %>% 
+    mutate(predicted_x = exp(predict(fit,data %>% select(years)))) %>% 
+    mutate(st_error = sqrt(diag(vcov(fit)))[2])
+  
+  return(list("rate"=fit$coefficients[2],"data"=data))
+}
+
+
+## figure style
+
+theme_wl <- function() {
+  
+  font <- "sans"
+  
+  theme_bw() %+replace%
+    
+    theme(
+      
+      # Grid elements
+      
+      panel.grid.minor = element_blank(),    #strip minor gridlines
+      axis.ticks = element_line(color="#636363",size = 0.7),          #strip axis ticks
+      
+      
+      # Border lines
+      panel.border = element_rect(color="#636363",fill=NA,size = 0.7),
+      panel.background = element_blank(),
+      
+      # Text elements
+      
+      plot.title = element_text(             #title
+        family = font,            #set font family
+        size = 13,                #set font size
+        face = 'bold',            #bold typeface
+        hjust = 0,                #left align
+        vjust = 3,                #raise slightly
+        color = '#636363'),       #color
+      
+      plot.subtitle = element_text(
+        family = font,
+        size = 11,
+        hjust = 0,
+        vjust = 2,
+        color = '#636363'),
+      
+      plot.caption = element_text(           #caption
+        family = font,            #font family
+        size = 9,                 #font size
+        hjust = 0,                #right align
+        color = '#bdbdbd'),       #color
+      
+      axis.title = element_text(             #axis titles
+        family = font,            #font family
+        size = 10,                #font size
+        color = '#636363'),       #color
+      
+      axis.text = element_text(              #axis text
+        family = font,            #axis famuly
+        size = 9,                 #font size
+        color = '#636363'),       #color
+      
+      axis.text.x = element_text(            #margin for axis text
+        margin=margin(5, b = 10)),
+      
+      text = element_text(
+        family = font,
+        color = '#636363')
+      
+    )
+  
+}
+
+
+``` 
+
+``` {r data,include=FALSE}
+
+#### which countries peaked in total GHG emissions for more than 10 years?
+
+## gather data
+
+data_peaking <- edgar_ghg %>% 
+  group_by(iso,country,year) %>% 
+  summarise_at(vars(CO2,CH4,N2O,Fgas,GHG),sum,na.rm=TRUE)
+
+## join population and GDP data
+
+data_peaking <- left_join(data_peaking,data_wdi_pop %>% select(-country),by=c("iso","year"))
+
+## filter to countries above 1m population
+
+data_peaking <- data_peaking %>% 
+  group_by(country) %>% 
+  mutate(include=ifelse(max(population)>1e6,1,0)) %>% 
+  ungroup() %>% 
+  filter(include==1) %>% 
+  select(-include)
+
+
+## find peak year CO2, excluding years after 2012
+
+peak_years_CO2 <- data_peaking %>% 
+  filter(year<2012) %>% 
+  group_by(country) %>% 
+  summarise(peak_year_CO2=year[which.max(CO2)])
+
+## find peak year GHG, excluding years after 2012
+
+peak_years_GHG <- data_peaking %>% 
+  filter(year<2012) %>% 
+  group_by(country) %>% 
+  summarise(peak_year_GHG=year[which.max(GHG)])
+
+peak_years <- left_join(peak_years_CO2,peak_years_GHG,by = "country")
+peak_years <- peak_years %>% 
+  select(country,peak_year=peak_year_CO2)
+
+data_peaking <- left_join(data_peaking,peak_years,by = "country")
+
+
+## calculate CO2 growth since peak year
+
+rates_CO2 <- data_peaking %>% filter(country=="nothing") # create empty dataframe
+
+for (i in 1:length(unique(data_peaking$country))) {
+  
+  temp_data <- data_peaking %>% 
+    filter(country==unique(data_peaking$country)[i])
+  
+  temp_data <- temp_data %>% 
+    filter(year>=temp_data$peak_year[1])
+  
+  rates <- growth_rate(temp_data$year,temp_data$CO2)
+  
+  temp_data$rate_CO2_peak <- rates$rate
+  temp_data$fit_CO2 <- rates$data$predicted_x
+  temp_data$st_error <- rates$data$st_error
+  
+  rates_CO2 <- rbind(rates_CO2,temp_data)
+}
+
+#rejoin with full data
+
+data_peaking <- left_join(data_peaking,rates_CO2 %>% select(country,year,rate_CO2_peak,fit_CO2),by = c("country", "year"))
+
+data_peaking <- data_peaking %>% 
+  group_by(country) %>% 
+  mutate(rate_CO2_peak=na.locf(rate_CO2_peak,fromLast=TRUE))
+
+
+## now do the same for GHG emissions
+
+rates_GHG <- data_peaking %>% 
+  filter(country=="nothing") %>%  # create empty dataframe 
+  select(-fit_CO2,-rate_CO2_peak)
+
+for (i in 1:length(unique(data_peaking$country))) {
+  
+  temp_data <- data_peaking %>% 
+    filter(country==unique(data_peaking$country)[i])
+  
+  temp_data <- temp_data %>% 
+    filter(year>=temp_data$peak_year[1])
+  
+  rates <- growth_rate(temp_data$year,temp_data$GHG)
+  
+  temp_data$rate_GHG_peak <- rates$rate
+  temp_data$fit_GHG <- rates$data$predicted_x
+  temp_data$st_error <- rates$data$st_error
+  
+  rates_GHG <- rbind(rates_GHG,temp_data)
+}
+
+#rejoin with full data
+
+data_peaking <- left_join(data_peaking,rates_GHG %>% select(country,year,rate_GHG_peak,fit_GHG),by = c("country", "year"))
+
+data_peaking <- data_peaking %>% 
+  group_by(country) %>% 
+  mutate(rate_GHG_peak=na.locf(rate_GHG_peak,fromLast=TRUE))
+
+
+## now calculate the last 10 years
+
+rates_GHG_2012 <- data_peaking %>% filter(country=="nothing") # create empty dataframe
+
+for (i in 1:length(unique(data_peaking$country))) {
+  
+  temp_data <- data_peaking %>%
+    filter(country==unique(data_peaking$country)[i]) %>% 
+    filter(year>2011)
+  
+  rates <- growth_rate(temp_data$year,temp_data$GHG)
+  
+  temp_data$rate_GHG_2012 <- rates$rate*100
+  
+  rates_GHG_2012 <- rbind(rates_GHG_2012,temp_data)
+}
+
+data_peaking <- left_join(data_peaking,rates_GHG_2012 %>% filter(year==2021) %>% select(country,rate_GHG_2012),by = c("country"))
+
+
+```
+
+
+```{r consumption_data_and_rates,echo=FALSE,warning=FALSE,include=FALSE}
+
+cons <- openxlsx::read.xlsx('Sources/GCB/National_Fossil_Carbon_Emissions_2022v1.0.xlsx',sheet=3,startRow = 1)
+cons[8,1] <- "year"
+names(cons) <- cons[8,]
+cons <- cons[9:40,]
+
+cons <- gather(cons,country,value,-year)
+cons <- cons %>% 
+  mutate(value=as.numeric(value)) %>% 
+  mutate(value=value*3.664*1e6) %>% 
+  mutate(iso=countrycode(country,"country.name","iso3c")) %>% 
+  mutate(year=as.numeric(year))
+
+data_peaking <- left_join(data_peaking,cons %>% select(iso,year,CO2_cons=value),by = c("iso", "year"))
+
+rates_cons <- data_peaking %>% 
+  filter(country=="nothing") # create empty dataframe 
+
+for (i in 1:length(unique(data_peaking$country))) {
+  
+  temp_data <- data_peaking %>% 
+    filter(country==unique(data_peaking$country)[i])
+  
+  temp_data <- temp_data %>% 
+    filter(year>=temp_data$peak_year[1])
+  
+  ### if peak year is before 1990, calculate rate from 1990 (start of cons data)
+  if (temp_data$peak_year[1]<1990) {
+    
+    temp_data <- temp_data %>% 
+      filter(year>=1990)
+    
+  }
+  
+  ### calculate rates to 2019 only
+  
+  temp_data <- temp_data %>% 
+    filter(year<2020)
+  
+  ### if there is no cons data, just fill NaNs
+  if (is.na(temp_data$CO2_cons[1])==1) {
+    
+    temp_data$rate_CO2_cons_peak <- NA
+    temp_data$fit_CO2_cons <- NA
+    temp_data$st_error <- NA
+    
+  } else {
+    
+    rates <- growth_rate(temp_data$year,temp_data$CO2_cons)
+    
+    temp_data$rate_CO2_cons_peak <- rates$rate
+    temp_data$fit_CO2_cons <- rates$data$predicted_x
+    temp_data$st_error <- rates$data$st_error
+    
+    rates_cons <- rbind(rates_cons,temp_data)
+    
+  }
+}
+
+
+#rejoin with full data
+
+data_peaking <- left_join(data_peaking,rates_cons %>% ungroup() %>% select(iso,year,rate_CO2_cons_peak,fit_CO2_cons),by = c("iso", "year"))
+
+data_peaking <- data_peaking %>% 
+  group_by(country) %>% 
+  mutate(rate_CO2_cons_peak=na.locf0(rate_CO2_cons_peak,fromLast=FALSE)) %>% 
+  mutate(rate_CO2_cons_peak=na.locf0(rate_CO2_cons_peak,fromLast=TRUE)) %>% 
+  mutate(rate_CO2_cons_peak=rate_CO2_cons_peak*100) 
+
+
+```
+
+
+
+
+``` {r exclusions,include=FALSE}
+
+
+fsi <- openxlsx::read.xlsx('Data/FSI-2023-DOWNLOAD.xlsx')
+fsi <- fsi %>% 
+  mutate(iso=countrycode(Country,"country.name","iso3c"))
+fsi$Rank <- gsub("st","",fsi$Rank)
+fsi$Rank <- gsub("nd","",fsi$Rank)
+fsi$Rank <- gsub("rd","",fsi$Rank)
+fsi$Rank <- gsub("th","",fsi$Rank)
+fsi$Rank <- as.numeric(fsi$Rank)
+
+data_peaking <- left_join(data_peaking,fsi %>% select(iso,fsi_rank=Rank),by="iso")
+
+data_peaking <- data_peaking %>% 
+  mutate(excluded=ifelse(fsi_rank>50,0,1)) %>% 
+  mutate(excluded=ifelse(iso=="UKR",0,excluded))
+
+
+# exclude countries with growth rates above or near 0
+
+data_peaking <- data_peaking %>% 
+  mutate(rate_CO2_peak=rate_CO2_peak*100) %>% 
+  mutate(rate_GHG_peak=rate_GHG_peak*100) %>% 
+  mutate(excluded=ifelse(rate_CO2_peak<0,excluded,1))
+
+data_peaking <- data_peaking %>% 
+  mutate(excluded=ifelse(abs(rate_CO2_peak)>0.1,excluded,1))
+
+
+# calculate absolute and relative reductions since peak
+
+rates_CO2 <- rates_CO2 %>% 
+  group_by(country) %>% 
+  summarise(percent_reduction_CO2_peak=((first(CO2)-last(CO2))/first(CO2))*100,
+            absolute_reduction_CO2_peak=first(CO2)-last(CO2),
+            CO2_peak=first(CO2))
+
+rates_GHG <- rates_GHG %>% 
+  group_by(country) %>% 
+  summarise(percent_reduction_GHG_peak=((first(GHG)-last(GHG))/first(GHG))*100,
+            absolute_reduction_GHG_peak=first(GHG)-last(GHG),
+            GHG_peak=first(GHG))
+
+data_peaking <- left_join(data_peaking,rates_CO2,by = "country")
+data_peaking <- left_join(data_peaking,rates_GHG,by = "country")
+
+
+# exclude countries with growing GHG emissions since the same CO2 peak year
+
+data_peaking <- data_peaking %>% 
+  mutate(excluded=ifelse(rate_GHG_peak<0,excluded,1))
+
+
+# exclude countries with emissions growing since 2012
+
+data_peaking <- data_peaking %>% 
+  mutate(excluded=ifelse(rate_GHG_2012<0,excluded,1))
+
+
+# exclude small countries with large oil industries and therefore large yearly emissions variations
+
+data_peaking <- data_peaking %>% 
+  mutate(excluded=ifelse(country=="Equatorial Guinea",1,excluded)) %>% 
+  mutate(excluded=ifelse(country=="Timor-Leste",1,excluded)) %>% 
+  mutate(excluded=ifelse(country=="Trinidad and Tobago",1,excluded)) %>% 
+  mutate(excluded=ifelse(country=="Gabon",1,excluded))
+
+
+
+included_countries <- data_peaking %>% 
+  ungroup() %>% 
+  filter(excluded==0) %>% 
+  select(iso,country,peak_year,rate_CO2_peak,rate_GHG_peak,rate_GHG_2012) %>% 
+  distinct()
+
+excluded <- data_peaking %>% 
+  ungroup() %>% 
+  filter(excluded==1) %>% 
+  select(iso,country,peak_year,rate_CO2_peak,rate_GHG_peak,rate_GHG_2012) %>% 
+  distinct()
+
+
+data_peaking <- data_peaking %>% 
+  mutate(country=ifelse(iso=="MKD","North Macedonia",country))
+
+
+
+included_countries <- left_join(included_countries,country_aggregations %>% select(iso,EU,Annex1),by="iso")
+included_countries <- included_countries %>% 
+  group_by(EU,Annex1) %>% 
+  summarise(n=n(),countries=paste0(country,collapse="; "))
+
+```
+
+```{r all_countries_trend_ghg,echo=FALSE,warning=FALSE,fig.width=12,fig.height=14,dpi=300,fig.path="../../Results/Plots/Decarbonising countries/",dev=c('png','pdf')}
+
+data_peaking_plot <- data_peaking %>% 
+  ungroup() %>% 
+  filter(excluded==0)
+
+## set facet labels and order by cluster and growth rate
+
+data_peaking_plot <- data_peaking_plot %>%
+  mutate(labels=paste0(country,"\n(",round(rate_GHG_peak,1),"%/yr, -",round(absolute_reduction_GHG_peak/1e6),"MtCO2e)"))
+  #mutate(labels=paste0(country," (",round(rate_CO2_peak,1),"%/yr)"))
+
+data_peaking_plot <- data_peaking_plot %>%
+  mutate(labels=as.character(labels)) %>% 
+  mutate(labels=as.factor(labels))
+
+# data_peaking_plot <- data_peaking_plot %>%
+#   mutate(cluster_name = ifelse(cluster==1,"Recent peak",NA)) %>%
+#   mutate(cluster_name = ifelse(cluster==2,"Long-term decline",cluster_name)) %>%
+#   mutate(cluster_name = ifelse(cluster==3,"Former Eastern Bloc",cluster_name))
+
+data_peaking_plot$labels=fct_reorder(data_peaking_plot$labels,data_peaking_plot$rate_GHG_peak)
+# data_peaking_plot$labels=fct_reorder2(data_peaking_plot$labels,data_peaking_plot$rate_GHG_peak,desc(as.numeric(data_peaking_plot$cluster)))
+
+data_peaking_plot <- gather(data_peaking_plot,paths,value,CO2,GHG,CO2_cons,fit_GHG)
+data_peaking_plot$paths <- as.factor(data_peaking_plot$paths)
+data_peaking_plot$paths <- factor(data_peaking_plot$paths,levels=levels(data_peaking_plot$paths)[c(1,2,4,3)])
+
+decarbonising_countries <- data_peaking_plot %>%
+  ggplot(.,aes(x=year,y=value,color=paths)) +
+  geom_path(size=1) +
+  # geom_text(data=data %>% filter(year==2015),aes(x=1970,y=0,label=cluster_name),hjust="inward",vjust="inward",size=3.5,color="#636363") +
+  scale_x_continuous(limits=c(1970,2022),breaks=c(1980,2000,2020)) +
+  scale_y_continuous(expand = c(0.1, .1), limits = c(0, NA)) +
+  scale_color_manual(values=c("#66c2a5","#fc8d62","#8da0cb","#525252"),labels=c("CO2 emissions\n(territorial)","CO2 emissions\n(consumption)","GHG emissions\n(territorial)","Fit since peak year\n(GHG territorial)")) +
+  theme_wl() +
+  facet_wrap(.~labels,scales="free") +
+  theme(axis.text.y = element_blank(),
+        axis.ticks.y = element_blank(),
+        legend.position = "bottom",
+        legend.title = element_blank(),
+        axis.title = element_blank(),
+        plot.title = element_text(size = 12),
+        strip.text = element_text(size = 12,margin = margin(0.4,0,0.4,0, "cm"),lineheight=1)) +
+  guides(color = guide_legend(override.aes = list(size = 2)))
+decarbonising_countries
+
+
+```

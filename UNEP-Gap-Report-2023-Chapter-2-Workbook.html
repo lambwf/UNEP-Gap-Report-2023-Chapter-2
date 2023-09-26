@@ -168,10 +168,35 @@ pre code {
 </div>
 
 
+<pre><code>## Warning: There was 1 warning in `mutate()`.
+## ℹ In argument: `iso = countrycode(country, &quot;country.name&quot;, &quot;iso3c&quot;)`.
+## Caused by warning in `countrycode_convert()`:
+## ! Some values were not matched unambiguously: Africa, Asia, Bunkers, Central.America, EU27, Europe, Kosovo, KP.Annex.B, Middle.East, Non-OECD, Non.KP.Annex.B, North.America, Oceania, OECD, South.America, Statistical.Difference, World</code></pre>
+<pre><code>## `summarise()` has grouped output by &#39;country&#39;, &#39;iso&#39;, &#39;units&#39;. You can override
+## using the `.groups` argument.
+## New names:
+## New names:
+## New names:
+## Joining with `by = join_by(year, country)`
+## Joining with `by = join_by(year, country)`
+## `summarise()` has grouped output by &#39;country&#39;, &#39;year&#39;. You can override using
+## the `.groups` argument.</code></pre>
+<pre><code>## Warning: There was 1 warning in `mutate()`.
+## ℹ In argument: `iso = countrycode(country, &quot;country.name&quot;, &quot;iso3c&quot;)`.
+## ℹ In group 138: `country = &quot;Netherlands Antilles&quot;`.
+## Caused by warning in `countrycode_convert()`:
+## ! Some values were not matched unambiguously: Netherlands Antilles</code></pre>
+<pre><code>## `summarise()` has grouped output by &#39;country&#39;, &#39;iso&#39;, &#39;units&#39;. You can override
+## using the `.groups` argument.
+## `summarise()` has grouped output by &#39;country&#39;, &#39;iso&#39;, &#39;units&#39;. You can override
+## using the `.groups` argument.
+## `summarise()` has grouped output by &#39;country&#39;, &#39;iso&#39;. You can override using
+## the `.groups` argument.</code></pre>
 <pre><code>## [1] 0.2617841</code></pre>
 <pre><code>## `summarise()` has grouped output by &#39;iso&#39;, &#39;country&#39;. You can override using
 ## the `.groups` argument.
-## Joining with `by = join_by(iso)`</code></pre>
+## Joining with `by = join_by(iso)`
+## Adding missing grouping variables: `country`, `iso`</code></pre>
 <pre><code>## `summarise()` has grouped output by &#39;year&#39;, &#39;sector&#39;. You can override using
 ## the `.groups` argument.
 ## `summarise()` has grouped output by &#39;year&#39;. You can override using the

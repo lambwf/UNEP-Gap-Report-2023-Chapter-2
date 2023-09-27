@@ -347,8 +347,8 @@ gather(wd_all,dataset,value,edgar,primap,ch3_inventory) %>%
 
 
 wb <- createWorkbook()
-addWorksheet(wb,"data_comparison_ghg")
-writeData(wb, sheet = "data_comparison_ghg", wd_all, colNames = T, rowNames = F)
+addWorksheet(wb,"data_comparison_ghg_gwp100_ar4")
+writeData(wb, sheet = "data_comparison_ghg_gwp100_ar4", wd_all, colNames = T, rowNames = F)
 
 
 ```
@@ -414,7 +414,6 @@ writeData(wb, sheet = "data_comparison_lulucf", wd_lulucf, colNames = T, rowName
 saveWorkbook(wb,paste0("Results/UNEP-Gap-Report-2023-Chapter-2-Data-Comparison.xlsx"),overwrite=T)
 
 ```
-
 
 ``` {r g20_figure,fig.width=8,fig.height=10,dpi=300,include=FALSE, fig.path="Results/",dev=c('png','pdf','svg')}
 

@@ -403,7 +403,7 @@ gas_trend <- left_join(gas_trend,lulucf_gcb_totals,by=c("year"="year"))
 ## add GCB land use 2022 projection
 
 gas_trend <- gas_trend %>%
-  mutate(LULUCF_CO2=ifelse(year==2022,3.9,LULUCF_CO2))
+  mutate(LULUCF_CO2=ifelse(year==2022,3.87,LULUCF_CO2))
   
 
 ## join land use change data (national GHG inventories)
@@ -510,7 +510,7 @@ p1 <- gas_trend %>%
   #                          aes(x=year+4,y=61,                                label=paste0("+",round(total_rate,1),"%/yr")),size=3.5,colour="#252525") +
   
   #### text with the totals
-  geom_text(inherit.aes = FALSE, data=gas_totals %>% filter(year %in% c(1990,2000,2010,2020,2022)),aes(x=ifelse(year==2022,year+0.5,year),y=63,label=paste(signif(totals,3),"Gt")),
+  geom_text(inherit.aes = FALSE, data=gas_totals %>% filter(year %in% c(1990,2000,2010,2020,2022)),aes(x=ifelse(year==2022,year+0.5,year),y=63,label=paste(signif(totals,3))),
            size=3.5,colour="#252525") +
   
   #ylab(bquote("Greenhouse gas emissions (Gt" ~CO[2]* "eq/yr)")) +
@@ -560,7 +560,7 @@ p2 <- gas_comparison %>%
   geom_col(colour="#737373",width=0.45) +
   coord_flip() +
   #### text with the totals
-  geom_text(inherit.aes = FALSE, data=gas_comparison %>% group_by(var) %>% summarise(value=sum(value)),aes(x=var,y=61,label=paste(signif(value,3),"Gt")),        size=3.5,colour="#252525") +
+  geom_text(inherit.aes = FALSE, data=gas_comparison %>% group_by(var) %>% summarise(value=sum(value)),aes(x=var,y=61,label=paste(signif(value,3))),size=3.5,colour="#252525") +
   
   scale_y_continuous(breaks=c(0,10,20,30,40,50,60),limits=c(-5,64)) +
   scale_x_discrete(labels=c("GHG emissions +\nbookkeeping LULUCF","GHG emissions +\ninventory LULUCF")) +
@@ -917,21 +917,21 @@ totals <- data_inequality %>%
   mutate(group="Total") %>% 
   group_by(group,indicator) %>% 
   summarise(value=sum(value)) %>%
+  ## replace my aggregated total with the one in Jones et al.
+  mutate(value=ifelse(indicator=="warming_hist",data_warming_ntl$value[data_warming_ntl$country=="GLOBAL"],value)) %>% 
   mutate(units=ifelse(indicator=="co2_hist","GtCO2","°C")) %>% 
   mutate(units=ifelse(indicator=="ghg_current","GtCO2e",units)) %>% 
   mutate(units=ifelse(indicator=="pop_current","Billion",units)) %>%
   mutate(label=paste0(signif(value,3)," ",units))
-  
+
 data_inequality <- data_inequality %>% 
   group_by(group,indicator) %>% 
   summarise(value=value/totals$value[totals$indicator==indicator]) %>% 
   mutate(value=value*100)
 
-
-# data_inequality <- spread(data_inequality,indicator,value)
-# data_inequality <- data_inequality %>% 
-#   mutate(co2=co2/sum(data_inequality$co2)) %>% 
-#   mutate(warming=warming/sum(data_inequality$warming))
+## add the residual warming not captured by my aggregation to the "rest of the world"
+data_inequality$value[data_inequality$indicator=="warming_hist" & data_inequality$group=="Rest of world"] <-
+  data_inequality$value[data_inequality$indicator=="warming_hist" & data_inequality$group=="Rest of world"] + (100-sum(data_inequality$value[data_inequality$indicator=="warming_hist"]))
 
 data_inequality <- spread(data_inequality,indicator,value)
 data_inequality$group <- as.factor(data_inequality$group)
@@ -1118,6 +1118,10 @@ data_sectors <- data_sectors %>%
 
 wb2 <- createWorkbook()
 
+addWorksheet(wb2,"global_totals")
+writeData(wb2, sheet = "global_totals", gas_trend, colNames = T, rowNames = F)
+
+
 data_table_levels <- gas_trend %>% 
   filter(year>=2010 & year <=2019) %>% 
   group_by(gas) %>% 
@@ -1227,8 +1231,24 @@ data_table_country_trend <- data_table_country_trend %>%
   select(iso,country,`2021`,`2022`,abs_change,rel_change)
 
 
-addWorksheet(wb2,"country_trend_2021_2022")
-writeData(wb2, sheet = "country_trend_2021_2022", data_table_country_trend, colNames = T, rowNames = F)
+addWorksheet(wb2,"high_emitter_trend_2021_2022")
+writeData(wb2, sheet = "high_emitter_trend_2021_2022", data_table_country_trend, colNames = T, rowNames = F)
+
+
+country_trend_g20 <- left_join(country_trend,country_aggregations %>% select(iso,G20),by = join_by(iso)) %>% 
+  mutate(G20=ifelse(iso=="EU27",1,G20)) %>% 
+  filter(G20==1) %>% 
+  select(-high_emitters,-gross_ghg_difference,-G20)
+
+
+addWorksheet(wb2,"G20_data")
+writeData(wb2, sheet = "G20_data", country_trend_g20, colNames = T, rowNames = F)
+
+
+
+addWorksheet(wb2,"country_data")
+writeData(wb2, sheet = "country_data", country_trend %>% select(-high_emitters,-gross_ghg_difference), colNames = T, rowNames = F)
+
 
 
 
@@ -1336,16 +1356,97 @@ ineq(blarg$GHG_total_pc,na.rm=TRUE,type="Gini")
 
 ```
 
-``` {r g20,include=FALSE}
+``` {r fig_4_households,fig.height=4,fig.width=7,fig.path="Results/",dev=c('png','pdf','svg'),dpi=300}
 
-blarg <- edgar_ghg %>% 
-  filter(year==2021) %>% 
-  group_by(country,year) %>% 
-  summarise(GHG=sum(GHG,na.rm=TRUE))
 
+household <- read.csv('Data/Not public/UNEP-countries.csv',sep="")
+household <- household %>%
+  mutate(iso=countrycode(sourcevar=iso,origin='iso2c',destination='iso3c')) %>% 
+  mutate(GHG_pc=as.numeric(GHGemissionspercapita)) %>% 
+  select(-NAMES_STD)
+
+household_regions <- read.csv('Data/Not public/UNEP-regions.csv',sep="")
+household_regions <- household_regions %>% 
+  filter(iso=="Europe" | iso=="World") %>% 
+  mutate(GHG_pc=as.numeric(GHGemissionspercapita)) %>% 
+  rename(group=p) %>% 
+  mutate(country=iso) %>% 
+  filter(year==2019)
+
+household <- left_join(household,country_aggregations %>% select(iso,high_emitters),by="iso")
+household <- household %>% 
+  filter(high_emitters==1) %>% 
+  filter(year==2019) %>% 
+  select(-high_emitters) %>% 
+  mutate(country=countrycode(iso,"iso3c","country.name"))
+
+household <- rbind(household,household_regions)
+household <- household %>% 
+  filter(group!="p90p100") 
+
+household$country <- as.factor(household$country)
+reordered_factor <- reorder(household$country[household$group == "p99p100"], 
+                            household$GHG_pc[household$group == "p99p100"])
+household$country <- factor(household$country, levels = levels(reordered_factor))
+
+household <- household %>% 
+  mutate(label=ifelse(group=="p0p50","Bottom 50%",NA)) %>% 
+  mutate(label=ifelse(group=="p50p90","Middle 40%",label)) %>% 
+  mutate(label=ifelse(group=="p90p99","Next 9%",label)) %>% 
+  mutate(label=ifelse(group=="p99p100","Top 1%",label))
+
+## adjust with updated data from Lucas Chancel
+household_newdata <- read.xlsx("Data/Not public/data-unep.xlsx",sheet=1,startRow = 2)
+household_newdata <- household_newdata %>% 
+  mutate(country=countrycode(iso,"iso2c","country.name")) %>% 
+  filter(!is.na(`Bottom.50%`)) %>% 
+  mutate(country=ifelse(is.na(country),iso,country)) %>% 
+  select(-iso)
+household_newdata <- gather(household_newdata,label,value_new,-country)
+household_newdata <- household_newdata %>% 
+  mutate(label=ifelse(grepl("Bottom",label),"Bottom 50%",label)) %>% 
+  mutate(label=ifelse(grepl("Middle",label),"Middle 40%",label)) %>% 
+  mutate(label=ifelse(grepl("Next",label),"Next 9%",label)) %>% 
+  mutate(label=ifelse(grepl("Top",label),"Top 1%",label))
+
+
+household <- full_join(household,household_newdata,by = join_by(country, label))
+household <- household %>% 
+  mutate(GHG_pc =ifelse(!is.na(value_new),value_new,GHG_pc)) %>% 
+  filter(!is.na(label)) %>% 
+  select(country,label,GHG_pc)
+
+household$country <- as.factor(household$country)
+household$country <- fct_relevel(household$country,"India","Indonesia","Brazil","Europe","World","China","Russia","United States")
+
+household %>% 
+  ggplot(.,aes(x=GHG_pc,y=country,fill=country)) +
+  geom_point(shape=21,size=4,color="#737373",alpha=0.6) +
+  geom_label_repel(data=household %>% filter(country=="United States"),aes(label=label),
+                  color="#636363",
+                  fill="white",
+                  max.overlaps = Inf,
+                  #xlim = c(25,250),
+                  ylim = c(8.2,9),
+                  size=3.5) +
+  theme_wl() +
+  expand_limits(y=c(0,9)) +
+  scale_fill_brewer(palette="Set2") +
+  #xlab("GHG emissions (tCO2eq/capita)") +
+  theme(legend.position="none",
+        axis.title.y = element_blank(),
+        axis.title.x = element_blank()) +
+  labs(title="Household GHG emissions in 2019, excluding LULUCF",
+       subtitle=bquote(t~CO[2]~eq/capita))
+
+addWorksheet(wb,"fig_4_households")
+
+writeData(wb, sheet = "fig_4_households", household, colNames = T, rowNames = F)
 
 
 ```
+
+
 
 ``` {r save_data,include=FALSE}
 
